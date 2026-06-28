@@ -18,17 +18,21 @@ import json
 import time
 import logging
 import hashlib
+import uuid
 import requests
 import duckdb
+import boto3
+import json
 from dotenv import load_dotenv
 from datetime import datetime, timezone
 
 load_dotenv()
-RAPID_KEY = os.getenv('RAPID_KEY')
-RAPID_HOST = os.getenv('RAPID_HOST')
-DB_PATH = 'jobs_warehouse.duckdb'
+RAPID_KEY = os.getenv("RAPID_KEY")
+RAPID_HOST = os.getenv("RAPID_HOST", "jsearch.p.rapidapi.com")
+DB_PATH = os.getenv("DB_PATH", "jobs_warehouse.duckdb")  
 LOG_DIR = 'logs'
 LOG_FILE = os.path.join(LOG_DIR, 'ingest_jobs_pipeline.log')
+PAGE_SIZE = int(os.getenv("PAGE_SIZE", 50)) 
 
 SEARCH_QUERIES = ["data engineer", "data scientist", "machine learning engineer"]
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -41,6 +45,25 @@ logging.basicConfig(
 )
 logging.info("Starting job ingestion process")
 log = logging.getLogger(__name__)
+
+
+# def get_secret(secret_name: str) -> dict:
+#     client = boto3.client(
+#         "secretsmanager",
+#         region_name="ap-south-1"
+#     )
+
+#     response = client.get_secret_value(
+#         SecretId="job-analytics/rapidapi"
+#     )
+
+#     return json.loads(response["SecretString"])
+
+# secrets = get_secret("job-analytics/rapidapi")
+
+# RAPID_KEY = secrets["RAPID_KEY"]
+# RAPID_HOST = secrets["RAPID_HOST"]
+# DB_PATH = secrets.get("DB_PATH", "jobs_warehouse.duckdb")  # default to local file if not set
 
 def get_connection() -> duckdb.DuckDBPyConnection:
     """Establishes a connection to the DuckDB database."""
@@ -93,7 +116,7 @@ def search_jobs(query: str)-> list[dict]:
         "query": query,
         "page": 1,
         "date_posted": "week",  # fetch only recent jobs to avoid duplicates
-        "num_pages": 1          # limit to first page for demo; can be increased
+        "num_pages": PAGE_SIZE          # limit to first page for demo; can be increased
     }
     log.info(f"Fetching jobs for query '{query!r}' from API") 
     try:
@@ -132,7 +155,7 @@ def ingest_query(con: duckdb.DuckDBPyConnection, query: str) -> dict:
     to run multiple times. Re-running produces the same warehouse state —
     a fundamental property of reliable data pipelines.
     """
-    run_id = hashlib.md5(f"{query}_{datetime.now()}".encode()).hexdigest()[:8]
+    run_id = str(uuid.uuid4())
     fetched_at = datetime.now(timezone.utc) #always UTC
     stats = {"jobs_fetched": 0, "jobs_inserted": 0, "jobs_skipped": 0, "error_msg": None}
 
